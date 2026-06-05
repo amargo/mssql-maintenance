@@ -113,6 +113,7 @@ The mounted file replaces the image's built-in schedule entirely. The container 
 | `BACKUP_FILE_COMPRESS_DELETE_ORIGINAL` | No | Delete original `.bak` after successful compression (`Y`/`N`, default: `N` — keep originals) |
 | `BACKUP_FILE_COMPRESS_MIN_AGE_MINUTES` | No | Minimum file age in minutes before compressing (default: `5`) |
 | `BACKUP_HOST_DIR` | No | Path inside the maintenance container where backup files are accessible (default: `/backup`) |
+| `BACKUP_FILE_COMPRESS_DIR` | No | Path inside the maintenance container where compressed backup archives are written (default: `/backup-compressed`) |
 
 Backup target directory is set in `scripts/backup-full.sh` and `scripts/backup-diff.sh`:
 
@@ -141,7 +142,7 @@ External compression is **disabled by default**. Enable it explicitly by setting
 **How it works:**
 
 1. SQL Server writes a normal `.bak` file to `/var/opt/mssql/backup/` (inside the `db` container).
-2. After `DatabaseBackup` returns successfully, `compress-backups.sh` scans `/backup` (the same host path mounted into the maintenance container) and compresses eligible files.
+2. After `DatabaseBackup` returns successfully, `compress-backups.sh` scans `/backup` (the same host path mounted into the maintenance container) and compresses eligible files into `/backup-compressed`.
 3. Output examples: `.bak.zst`, `.bak.gz`, or `.bak.7z` — the original extension is preserved inside the compressed filename for clarity.
 4. If `BACKUP_FILE_COMPRESS_DELETE_ORIGINAL=Y`, the original `.bak`, `.dif`, or `.trn` is removed after successful compression (default is `N` — originals are kept).
 5. If compression fails after a successful SQL backup, the whole backup job exits non-zero so monitoring reports the job as failed.
@@ -156,6 +157,7 @@ environment:
 volumes:
   - ./config/Logs/maintenance:/logs
   - ./mssql/backup:/backup                      # same host path as SQL Server's /var/opt/mssql/backup
+  - ./mssql/backup-compressed:/backup-compressed # compressed archives are written here
 ```
 
 Short alternatives:
@@ -170,7 +172,9 @@ BACKUP_FILE_COMPRESS: "7z"
 BACKUP_FILE_COMPRESS_LEVEL: "5"
 ```
 
-`./mssql/backup` on the host is the same directory as `/var/opt/mssql/backup` inside the `db` container (because SQL Server is mounted at `./mssql:/var/opt/mssql`). The `/backup` mount is **required** for compression to work; compression is silently skipped if the directory is not mounted.
+`./mssql/backup` on the host is the same directory as `/var/opt/mssql/backup` inside the `db` container (because SQL Server is mounted at `./mssql:/var/opt/mssql`). The `/backup` mount is **required** for compression to find source files, and `/backup-compressed` is **required** as the default archive destination. Compression is skipped if either directory is not mounted.
+
+The compressed output preserves the source-relative Ola directory structure. For example, `/backup/server/db/FULL/file.bak` becomes `/backup-compressed/server/db/FULL/file.bak.zst`. Keeping compressed archives outside `/backup` prevents Ola's cleanup from mixing original and externally compressed backup files in the same directory.
 
 **Disabling compression** (explicit):
 

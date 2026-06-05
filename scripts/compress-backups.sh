@@ -3,6 +3,7 @@ set -euo pipefail
 
 MODE="${BACKUP_FILE_COMPRESS:-none}"
 DIR="${BACKUP_HOST_DIR:-/backup}"
+OUT_DIR="${BACKUP_FILE_COMPRESS_DIR:-/backup-compressed}"
 LEVEL="${BACKUP_FILE_COMPRESS_LEVEL:-6}"
 DELETE_ORIGINAL="${BACKUP_FILE_COMPRESS_DELETE_ORIGINAL:-N}"
 MIN_AGE="${BACKUP_FILE_COMPRESS_MIN_AGE_MINUTES:-5}"
@@ -44,6 +45,11 @@ if [ ! -d "${DIR}" ]; then
     exit 0
 fi
 
+if [ ! -d "${OUT_DIR}" ]; then
+    echo "$(date): Compressed backup directory ${OUT_DIR} not mounted; skipping file compression."
+    exit 0
+fi
+
 COMPRESS_ERRORS=0
 while IFS= read -r -d '' FILE; do
     # Skip already-compressed files.
@@ -51,8 +57,10 @@ while IFS= read -r -d '' FILE; do
         *.zst|*.7z|*.gz|*.zip) continue ;;
     esac
 
-    DEST="${FILE}.${EXT}"
+    RELATIVE_FILE="${FILE#"${DIR}"/}"
+    DEST="${OUT_DIR}/${RELATIVE_FILE}.${EXT}"
     TMP_DEST="${DEST}.tmp.$$"
+    DEST_DIR="$(dirname -- "${DEST}")"
 
     if [ -f "${DEST}" ]; then
         echo "$(date): Skipping (already compressed): ${FILE}"
@@ -60,6 +68,7 @@ while IFS= read -r -d '' FILE; do
     fi
 
     echo "$(date): Compressing: ${FILE}"
+    mkdir -p -- "${DEST_DIR}"
     rm -f -- "${TMP_DEST}"
 
     COMPRESS_OK=0
