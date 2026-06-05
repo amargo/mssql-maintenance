@@ -1,0 +1,6 @@
+# Minute Hour Day Month Weekday Command
+0 3 * * * /scripts/backup-full.sh >> /logs/backup.log 2>&1
+0 7-17 * * * /scripts/backup-diff.sh >> /logs/backup-diff.log 2>&1
+0 1 * * 6 /scripts/index-optimize.sh >> /logs/index-optimize.log 2>&1
+0 4 * * 0 /scripts/integrity-check.sh >> /logs/integrity-check.log 2>&1
+0 5 * * 1 /scripts/cleanup-commandlog.sh >> /logs/cleanup.log 2>&1

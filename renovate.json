@@ -1,0 +1,84 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "config:best-practices",
+    ":ignoreModulesAndTests",
+    "group:monorepos",
+    "group:recommended",
+    ":pinDigestsDisabled",
+    "workarounds:all"
+  ],
+  "enabledManagers": [
+    "dockerfile",
+    "github-actions"
+  ],
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "📦 Dependency Dashboard",
+  "abandonmentThreshold": "365",
+  "osvVulnerabilityAlerts": true,
+  "platformAutomerge": true,
+  "packageRules": [
+    {
+      "matchDatasources": [
+        "docker"
+      ],
+      "pinDigests": false
+    },
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "pinDigests": false
+    },
+    {
+      "matchManagers": [
+        "dockerfile",
+        "devcontainer"
+      ],
+      "matchUpdateTypes": [
+        "minor"
+      ],
+      "groupName": "🐋 Docker minor updates",
+      "automerge": true,
+      "pinDigests": false
+    },
+    {
+      "matchManagers": [
+        "dockerfile",
+        "devcontainer"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "groupName": "🚢 Docker major updates",
+      "pinDigests": false
+    },
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "automerge": true,
+      "groupName": "⚡ GitHub Actions updates"
+    },
+    {
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "automerge": true,
+      "groupName": "🔖 Patch updates"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": [
+      "security"
+    ],
+    "osvVulnerabilityAlerts": true,
+    "automerge": true,
+    "enabled": true
+  }
+}
