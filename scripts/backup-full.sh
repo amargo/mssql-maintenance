@@ -6,6 +6,12 @@ if [ -n "${BACKUP_COMPRESS:-}" ]; then
     COMPRESS_PARAMS="@Compress = '${BACKUP_COMPRESS}',"
 fi
 
+BACKUP_FULL_CLEANUP_TIME="${BACKUP_FULL_CLEANUP_TIME-168}"
+if ! [[ "${BACKUP_FULL_CLEANUP_TIME}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "$(date): BACKUP_FULL_CLEANUP_TIME must be a positive integer number of hours." >&2
+    exit 1
+fi
+
 ENCRYPT_PARAMS=""
 if [ -n "${BACKUP_ENCRYPT_PASSWORD:-}" ]; then
     ENCRYPT_PARAMS="@Encrypt = 'Y', @EncryptionAlgorithm = 'AES_256', @EncryptionKey = '${BACKUP_ENCRYPT_PASSWORD}',"
@@ -19,7 +25,7 @@ EXEC master.dbo.DatabaseBackup
   @BackupType  = 'FULL',
   ${COMPRESS_PARAMS}
   ${ENCRYPT_PARAMS}
-  @CleanupTime = 168,
+  @CleanupTime = ${BACKUP_FULL_CLEANUP_TIME},
   @LogToTable  = 'Y';"
 echo "$(date): Full backup done."
 

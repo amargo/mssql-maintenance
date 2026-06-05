@@ -73,7 +73,29 @@ services:
 | Integrity check | Sunday 04:00 | `DatabaseIntegrityCheck` |
 | CommandLog cleanup | Monday 05:00 | `DELETE CommandLog` (30 days) |
 
-Edit `crontab` to change the schedule. Times use the container's `TZ` env var.
+Built-in `/etc/crontabs/root` schedule:
+
+```cron
+0 3 * * * /scripts/backup-full.sh >> /logs/backup.log 2>&1
+0 7-17 * * * /scripts/backup-diff.sh >> /logs/backup-diff.log 2>&1
+0 1 * * 6 /scripts/index-optimize.sh >> /logs/index-optimize.log 2>&1
+0 4 * * 0 /scripts/integrity-check.sh >> /logs/integrity-check.log 2>&1
+0 5 * * 1 /scripts/cleanup-commandlog.sh >> /logs/cleanup.log 2>&1
+```
+
+Edit `crontab` to change the built-in schedule before rebuilding the image. Times use the container's `TZ` env var.
+
+## Custom Schedule
+
+You can replace the built-in schedule by bind-mounting a custom BusyBox cron file over `/etc/crontabs/root`:
+
+```yaml
+volumes:
+  - ./config/Logs/maintenance:/logs
+  - ./mssql-maintenance/crontab:/etc/crontabs/root:ro
+```
+
+The mounted file replaces the image's built-in schedule entirely. The container runs cron as root and BusyBox `crond` reads `/etc/crontabs/root` by default. Keep log redirections such as `>> /logs/backup.log 2>&1` if you want persistent logs. Recreate or restart the maintenance container after changing a bind-mounted crontab if changes are not picked up immediately. If mounting from Windows and cron behaves unexpectedly, check that the file uses compatible line endings.
 
 ## Configuration
 
@@ -84,19 +106,23 @@ Edit `crontab` to change the schedule. Times use the container's `TZ` env var.
 | `BACKUP_COMPRESS` | No | Optional Ola `@Compress` value. Leave unset if the SQL Server edition does not support backup compression (e.g. Express) |
 | `BACKUP_ENCRYPT_PASSWORD` | No | Enables Ola backup encryption when set; used as the encryption key password |
 | `TZ` | No | Timezone for cron (default: UTC) |
-| `BACKUP_FILE_COMPRESS` | No | External post-backup compression. `zstd` or `none` (default: `none` — disabled) |
-| `BACKUP_FILE_COMPRESS_LEVEL` | No | zstd compression level (default: `6`; lower is faster, higher is smaller) |
+| `BACKUP_FULL_CLEANUP_TIME` | No | Full backup retention in hours for Ola `@CleanupTime` (default: `168`) |
+| `BACKUP_DIFF_CLEANUP_TIME` | No | Differential backup retention in hours for Ola `@CleanupTime` (default: `48`) |
+| `BACKUP_FILE_COMPRESS` | No | External post-backup compression mode: `none`, `zstd`, `gz`, or `7z` (default: `none` — disabled) |
+| `BACKUP_FILE_COMPRESS_LEVEL` | No | External compression level. `zstd`: `1-19`; `gz`: `1-9`; `7z`: `0-9` (default: `6`) |
 | `BACKUP_FILE_COMPRESS_DELETE_ORIGINAL` | No | Delete original `.bak` after successful compression (`Y`/`N`, default: `N` — keep originals) |
 | `BACKUP_FILE_COMPRESS_MIN_AGE_MINUTES` | No | Minimum file age in minutes before compressing (default: `5`) |
 | `BACKUP_HOST_DIR` | No | Path inside the maintenance container where backup files are accessible (default: `/backup`) |
 
-Backup target directory and retention are set in `scripts/backup-full.sh` and `scripts/backup-diff.sh`:
+Backup target directory is set in `scripts/backup-full.sh` and `scripts/backup-diff.sh`:
 
 ```bash
 @Directory   = '/var/opt/mssql/backup' # path inside SQL Server container
-@CleanupTime = 168                      # full backup retention in hours, 168 = 7 days
-@CleanupTime = 48                       # differential backup retention in hours, 48 = 2 days
 ```
+
+Ola Hallengren's `@CleanupTime` is backup retention in hours. It controls how long old backup files of the same type are kept before Ola cleanup can remove them. Full and differential backups have separate values because they usually have different retention windows. `BACKUP_FULL_CLEANUP_TIME` defaults to `168` hours and `BACKUP_DIFF_CLEANUP_TIME` defaults to `48` hours. Both values must be positive integers; empty, zero, and non-numeric values fail before `sqlcmd` runs.
+
+Compressed archives (`.zst`, `.gz`, `.7z`) always require separate retention management. This is true even when `BACKUP_FILE_COMPRESS_DELETE_ORIGINAL=N`: Ola may later remove the original `.bak`, `.dif`, or `.trn`, but it will not manage the compressed archive.
 
 ## Backup Files
 
@@ -108,16 +134,17 @@ If `BACKUP_ENCRYPT_PASSWORD` is set, the backup scripts pass Ola's `@Encrypt = '
 
 ## Post-Backup File Compression
 
-Because SQL Server Express cannot create compressed backups natively, the maintenance sidecar can compress completed `.bak`, `.dif`, and `.trn` files externally using `zstd` after each backup job finishes.
+Because SQL Server Express cannot create compressed backups natively, the maintenance sidecar can compress completed `.bak`, `.dif`, and `.trn` files externally after each backup job finishes.
 
-External compression is **disabled by default**. Enable it explicitly by setting `BACKUP_FILE_COMPRESS=zstd`.
+External compression is **disabled by default**. Enable it explicitly by setting `BACKUP_FILE_COMPRESS` to `zstd`, `gz`, or `7z`. `zstd` is recommended when compression is enabled because it is fast and has a good compression ratio. `gz` is broadly compatible, but usually slower or less space-efficient than zstd. `7z` can produce smaller archives, but is slower and more CPU-heavy.
 
 **How it works:**
 
 1. SQL Server writes a normal `.bak` file to `/var/opt/mssql/backup/` (inside the `db` container).
 2. After `DatabaseBackup` returns successfully, `compress-backups.sh` scans `/backup` (the same host path mounted into the maintenance container) and compresses eligible files.
-3. Output: `MyDatabase_FULL_20260605_030000.bak.zst` — the original extension is preserved inside the compressed filename for clarity.
-4. If `BACKUP_FILE_COMPRESS_DELETE_ORIGINAL=Y`, the original `.bak` is removed after successful compression (default is `N` — originals are kept).
+3. Output examples: `.bak.zst`, `.bak.gz`, or `.bak.7z` — the original extension is preserved inside the compressed filename for clarity.
+4. If `BACKUP_FILE_COMPRESS_DELETE_ORIGINAL=Y`, the original `.bak`, `.dif`, or `.trn` is removed after successful compression (default is `N` — originals are kept).
+5. If compression fails after a successful SQL backup, the whole backup job exits non-zero so monitoring reports the job as failed.
 
 **Opt-in Compose example** — add to the `mssql-maintenance` service:
 
@@ -125,10 +152,22 @@ External compression is **disabled by default**. Enable it explicitly by setting
 environment:
   BACKUP_FILE_COMPRESS: "zstd"                  # enable external compression
   BACKUP_FILE_COMPRESS_LEVEL: "6"               # 1 (fastest) – 19 (smallest); 6 is a good balance
-  BACKUP_FILE_COMPRESS_DELETE_ORIGINAL: "Y"     # remove .bak after successful .bak.zst creation
+  BACKUP_FILE_COMPRESS_DELETE_ORIGINAL: "Y"     # remove original after successful archive creation
 volumes:
   - ./config/Logs/maintenance:/logs
   - ./mssql/backup:/backup                      # same host path as SQL Server's /var/opt/mssql/backup
+```
+
+Short alternatives:
+
+```yaml
+BACKUP_FILE_COMPRESS: "gz"
+BACKUP_FILE_COMPRESS_LEVEL: "6"
+```
+
+```yaml
+BACKUP_FILE_COMPRESS: "7z"
+BACKUP_FILE_COMPRESS_LEVEL: "5"
 ```
 
 `./mssql/backup` on the host is the same directory as `/var/opt/mssql/backup` inside the `db` container (because SQL Server is mounted at `./mssql:/var/opt/mssql`). The `/backup` mount is **required** for compression to work; compression is silently skipped if the directory is not mounted.
@@ -144,6 +183,8 @@ BACKUP_FILE_COMPRESS: "none"
 ```bash
 # Step 1: decompress
 zstd -d MyDatabase_FULL_20260605_030000.bak.zst
+# or: gzip -d MyDatabase_FULL_20260605_030000.bak.gz
+# or: 7z x MyDatabase_FULL_20260605_030000.bak.7z
 
 # Step 2: restore with SQL Server normally
 # RESTORE DATABASE [MyDatabase] FROM DISK = '/path/to/MyDatabase_FULL_20260605_030000.bak'
@@ -151,7 +192,7 @@ zstd -d MyDatabase_FULL_20260605_030000.bak.zst
 
 **Note on job failure:** If compression fails after a successful SQL backup, the entire backup job script exits non-zero. Monitoring will report the job as failed even though the `.bak` file was written successfully. Check logs to distinguish a SQL backup failure from a post-backup compression failure.
 
-**Note on Ola CleanupTime:** Ola's `@CleanupTime` retention only applies to original `.bak` files. Once originals are replaced by `.zst` files, retention of compressed archives must be managed separately (e.g. a cron job removing old `.zst` files). This is out of scope for the current implementation.
+**Note on Ola CleanupTime:** Ola's `@CleanupTime` retention only applies to original `.bak`, `.dif`, and `.trn` files. Retention of compressed archives must be managed separately, for example by a cron job removing old `.zst`, `.gz`, or `.7z` files. This is out of scope for the current implementation.
 
 ## Logs
 
