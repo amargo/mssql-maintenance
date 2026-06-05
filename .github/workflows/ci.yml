@@ -41,6 +41,13 @@ jobs:
           patch_pattern: "/^fix(\\(\\w+\\))?:/"
           version_format: "${major}.${minor}.${patch}"
 
+      - name: Prepare Docker tags
+        id: docker-tags
+        run: |
+          REF_NAME="${GITHUB_REF_NAME//\//-}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "branch_sha=${REF_NAME}-${SHORT_SHA}" >> "${GITHUB_OUTPUT}"
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
@@ -55,7 +62,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=${{ steps.semver.outputs.version }},enable=${{ github.ref_name == 'main' }}
             type=raw,value=${{ steps.semver.outputs.major }}.${{ steps.semver.outputs.minor }},enable=${{ github.ref_name == 'main' }}
-            type=raw,value={{branch}}-{{sha}},enable=${{ github.ref_type == 'branch' }}
+            type=raw,value=${{ steps.docker-tags.outputs.branch_sha }},enable=${{ github.ref_type == 'branch' }}
 
       - name: Setup Docker buildx
         uses: docker/setup-buildx-action@v3

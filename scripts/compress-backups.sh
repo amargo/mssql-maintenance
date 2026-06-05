@@ -67,7 +67,7 @@ while IFS= read -r -d '' FILE; do
         continue
     fi
 
-    echo "$(date): Compressing: ${FILE}"
+    echo "$(date): Compressing: ${FILE} -> ${DEST}"
     mkdir -p -- "${DEST_DIR}"
     rm -f -- "${TMP_DEST}"
 
