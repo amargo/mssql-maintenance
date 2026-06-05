@@ -53,7 +53,7 @@ services:
     environment:
       MSSQL_HOST: "db"
       MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD}"
-      BACKUP_COMPRESS: "Y"          # set to N for older Express editions
+      # BACKUP_COMPRESS: "Y"        # optional; omit if unsupported by your SQL Server edition (e.g. Express)
       TZ: "Europe/Budapest"         # adjust to your timezone
     volumes:
       - ./config/Logs/maintenance:/logs
@@ -81,9 +81,14 @@ Edit `crontab` to change the schedule. Times use the container's `TZ` env var.
 |---|---|---|
 | `MSSQL_HOST` | Yes | SQL Server container name or hostname |
 | `MSSQL_SA_PASSWORD` | Yes | SA password |
-| `BACKUP_COMPRESS` | No | `Y` by default; set to `N` if the SQL Server edition does not support backup compression |
+| `BACKUP_COMPRESS` | No | Optional Ola `@Compress` value. Leave unset if the SQL Server edition does not support backup compression (e.g. Express) |
 | `BACKUP_ENCRYPT_PASSWORD` | No | Enables Ola backup encryption when set; used as the encryption key password |
 | `TZ` | No | Timezone for cron (default: UTC) |
+| `BACKUP_FILE_COMPRESS` | No | External post-backup compression. `zstd` or `none` (default: `none` — disabled) |
+| `BACKUP_FILE_COMPRESS_LEVEL` | No | zstd compression level (default: `6`; lower is faster, higher is smaller) |
+| `BACKUP_FILE_COMPRESS_DELETE_ORIGINAL` | No | Delete original `.bak` after successful compression (`Y`/`N`, default: `N` — keep originals) |
+| `BACKUP_FILE_COMPRESS_MIN_AGE_MINUTES` | No | Minimum file age in minutes before compressing (default: `5`) |
+| `BACKUP_HOST_DIR` | No | Path inside the maintenance container where backup files are accessible (default: `/backup`) |
 
 Backup target directory and retention are set in `scripts/backup-full.sh` and `scripts/backup-diff.sh`:
 
@@ -95,11 +100,58 @@ Backup target directory and retention are set in `scripts/backup-full.sh` and `s
 
 ## Backup Files
 
-SQL Server writes backups to `/var/opt/mssql/backup/` inside the `db` container, which maps to `./mssql/backup/` on the host (assuming the standard volume mount). The maintenance container does not need access to this path.
+SQL Server writes backups to `/var/opt/mssql/backup/` inside the `db` container, which maps to `./mssql/backup/` on the host (assuming the standard volume mount).
 
-SQL Server 2022 Express supports backup compression (`@Compress = 'Y'`). Earlier Express editions may not; set `BACKUP_COMPRESS=N` if you see compression errors.
+**SQL Server Express** does not support the native `@Compress` backup option. The scripts omit Ola's `@Compress` parameter by default; set `BACKUP_COMPRESS=Y` only on editions where native compression is supported (Standard, Enterprise, Developer).
 
 If `BACKUP_ENCRYPT_PASSWORD` is set, the backup scripts pass Ola's `@Encrypt = 'Y'`, `@EncryptionAlgorithm = 'AES_256'`, and `@EncryptionKey` parameters.
+
+## Post-Backup File Compression
+
+Because SQL Server Express cannot create compressed backups natively, the maintenance sidecar can compress completed `.bak`, `.dif`, and `.trn` files externally using `zstd` after each backup job finishes.
+
+External compression is **disabled by default**. Enable it explicitly by setting `BACKUP_FILE_COMPRESS=zstd`.
+
+**How it works:**
+
+1. SQL Server writes a normal `.bak` file to `/var/opt/mssql/backup/` (inside the `db` container).
+2. After `DatabaseBackup` returns successfully, `compress-backups.sh` scans `/backup` (the same host path mounted into the maintenance container) and compresses eligible files.
+3. Output: `MyDatabase_FULL_20260605_030000.bak.zst` — the original extension is preserved inside the compressed filename for clarity.
+4. If `BACKUP_FILE_COMPRESS_DELETE_ORIGINAL=Y`, the original `.bak` is removed after successful compression (default is `N` — originals are kept).
+
+**Opt-in Compose example** — add to the `mssql-maintenance` service:
+
+```yaml
+environment:
+  BACKUP_FILE_COMPRESS: "zstd"                  # enable external compression
+  BACKUP_FILE_COMPRESS_LEVEL: "6"               # 1 (fastest) – 19 (smallest); 6 is a good balance
+  BACKUP_FILE_COMPRESS_DELETE_ORIGINAL: "Y"     # remove .bak after successful .bak.zst creation
+volumes:
+  - ./config/Logs/maintenance:/logs
+  - ./mssql/backup:/backup                      # same host path as SQL Server's /var/opt/mssql/backup
+```
+
+`./mssql/backup` on the host is the same directory as `/var/opt/mssql/backup` inside the `db` container (because SQL Server is mounted at `./mssql:/var/opt/mssql`). The `/backup` mount is **required** for compression to work; compression is silently skipped if the directory is not mounted.
+
+**Disabling compression** (explicit):
+
+```yaml
+BACKUP_FILE_COMPRESS: "none"
+```
+
+**Restore procedure** (two steps required when originals were deleted):
+
+```bash
+# Step 1: decompress
+zstd -d MyDatabase_FULL_20260605_030000.bak.zst
+
+# Step 2: restore with SQL Server normally
+# RESTORE DATABASE [MyDatabase] FROM DISK = '/path/to/MyDatabase_FULL_20260605_030000.bak'
+```
+
+**Note on job failure:** If compression fails after a successful SQL backup, the entire backup job script exits non-zero. Monitoring will report the job as failed even though the `.bak` file was written successfully. Check logs to distinguish a SQL backup failure from a post-backup compression failure.
+
+**Note on Ola CleanupTime:** Ola's `@CleanupTime` retention only applies to original `.bak` files. Once originals are replaced by `.zst` files, retention of compressed archives must be managed separately (e.g. a cron job removing old `.zst` files). This is out of scope for the current implementation.
 
 ## Logs
 
@@ -141,6 +193,21 @@ docker compose build --build-arg SQLCMD_VER=1.9.0 mssql-maintenance
 1. Add a script to `scripts/` (copy an existing one as template).
 2. Add a cron line to `crontab`.
 3. Rebuild: `docker compose up -d --build mssql-maintenance`.
+
+## Upgrading
+
+### Native backup compression default removed
+
+Previously, the backup scripts defaulted to `@Compress = 'Y'` when `BACKUP_COMPRESS` was not set. This was removed because SQL Server Express does not support native compression and would error on every backup.
+
+**If you are running SQL Server Standard, Enterprise, or Developer** and were relying on the implicit default, you must now explicitly set:
+
+```yaml
+environment:
+  BACKUP_COMPRESS: "Y"
+```
+
+Without this, backups will succeed but produce uncompressed `.bak` files (no error, just larger files).
 
 ## License
 

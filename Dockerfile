@@ -1,6 +1,6 @@
 FROM alpine:3.19
 
-RUN apk add --no-cache bash ca-certificates curl
+RUN apk add --no-cache bash ca-certificates curl zstd
 
 ARG SQLCMD_VER=1.8.1
 RUN curl -fsSL "https://github.com/microsoft/go-sqlcmd/releases/download/v${SQLCMD_VER}/sqlcmd-linux-amd64.tar.bz2" \
