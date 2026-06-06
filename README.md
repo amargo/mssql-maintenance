@@ -139,7 +139,7 @@ environment:
 
 Ola Hallengren's `@CleanupTime` is backup retention in hours. It controls how long old backup files of the same type are kept before Ola cleanup can remove them. Full and differential backups have separate values because they usually have different retention windows. `BACKUP_FULL_CLEANUP_TIME` defaults to `168` hours and `BACKUP_DIFF_CLEANUP_TIME` defaults to `48` hours. Both values must be positive integers; empty, zero, and non-numeric values fail before `sqlcmd` runs.
 
-Compressed archives (`.zst`, `.gz`, `.7z`) always require separate retention management. This is true even when `BACKUP_FILE_COMPRESS_DELETE_ORIGINAL=N`: Ola may later remove the original `.bak`, `.dif`, or `.trn`, but it will not manage the compressed archive.
+Compressed archives (`.zst`, `.gz`, `.7z`) are cleaned up by `compress-backups.sh` using the same retention values. `BACKUP_FULL_CLEANUP_TIME` applies to compressed files under `FULL` directories, and `BACKUP_DIFF_CLEANUP_TIME` applies to compressed files under `DIFF` directories.
 
 ## Backup Files
 
@@ -161,7 +161,8 @@ External compression is **disabled by default**. Enable it explicitly by setting
 2. After `DatabaseBackup` returns successfully, `compress-backups.sh` scans `/backup` (the same host path mounted into the maintenance container) and compresses eligible files into `/backup-compressed`.
 3. Output examples: `.bak.zst`, `.bak.gz`, or `.bak.7z` — the original extension is preserved inside the compressed filename for clarity.
 4. If `BACKUP_FILE_COMPRESS_DELETE_ORIGINAL=Y`, the original `.bak`, `.dif`, or `.trn` is removed after successful compression (default is `N` — originals are kept).
-5. If compression fails after a successful SQL backup, the whole backup job exits non-zero so monitoring reports the job as failed.
+5. Expired compressed archives under `/backup-compressed` are deleted using the same full/differential retention values as Ola `@CleanupTime`.
+6. If compression fails after a successful SQL backup, the whole backup job exits non-zero so monitoring reports the job as failed.
 
 **Opt-in Compose example** — add to the `mssql-maintenance` service:
 
@@ -212,7 +213,7 @@ zstd -d MyDatabase_FULL_20260605_030000.bak.zst
 
 **Note on job failure:** If compression fails after a successful SQL backup, the entire backup job script exits non-zero. Monitoring will report the job as failed even though the `.bak` file was written successfully. Check logs to distinguish a SQL backup failure from a post-backup compression failure.
 
-**Note on Ola CleanupTime:** Ola's `@CleanupTime` retention only applies to original `.bak`, `.dif`, and `.trn` files. Retention of compressed archives must be managed separately, for example by a cron job removing old `.zst`, `.gz`, or `.7z` files. This is out of scope for the current implementation.
+**Note on Ola CleanupTime:** Ola's `@CleanupTime` retention only applies to original `.bak`, `.dif`, and `.trn` files. The sidecar mirrors that behavior for compressed archives in `/backup-compressed` by deleting expired `.zst`, `.gz`, and `.7z` files after each compression pass.
 
 ## Logs
 

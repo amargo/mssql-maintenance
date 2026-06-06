@@ -7,6 +7,8 @@ OUT_DIR="${BACKUP_FILE_COMPRESS_DIR:-/backup-compressed}"
 LEVEL="${BACKUP_FILE_COMPRESS_LEVEL:-6}"
 DELETE_ORIGINAL="${BACKUP_FILE_COMPRESS_DELETE_ORIGINAL:-N}"
 MIN_AGE="${BACKUP_FILE_COMPRESS_MIN_AGE_MINUTES:-5}"
+BACKUP_FULL_CLEANUP_TIME="${BACKUP_FULL_CLEANUP_TIME-168}"
+BACKUP_DIFF_CLEANUP_TIME="${BACKUP_DIFF_CLEANUP_TIME-48}"
 
 if [ "${MODE}" = "none" ] || [ -z "${MODE}" ]; then
     echo "$(date): Backup file compression disabled (BACKUP_FILE_COMPRESS=${MODE})."
@@ -39,6 +41,13 @@ if ! [[ "${LEVEL}" =~ ${LEVEL_PATTERN} ]]; then
     echo "$(date): ${LEVEL_ERROR}" >&2
     exit 1
 fi
+
+for CLEANUP_VALUE in BACKUP_FULL_CLEANUP_TIME BACKUP_DIFF_CLEANUP_TIME; do
+    if ! [[ "${!CLEANUP_VALUE}" =~ ^[1-9][0-9]*$ ]]; then
+        echo "$(date): ${CLEANUP_VALUE} must be a positive integer number of hours." >&2
+        exit 1
+    fi
+done
 
 if [ ! -d "${DIR}" ]; then
     echo "$(date): Backup directory ${DIR} not mounted; skipping file compression."
@@ -108,5 +117,43 @@ if [ "${COMPRESS_ERRORS}" -gt 0 ]; then
     echo "$(date): Compression finished with ${COMPRESS_ERRORS} error(s)." >&2
     exit 1
 fi
+
+cleanup_compressed_archives() {
+    local full_cleanup_minutes=$((BACKUP_FULL_CLEANUP_TIME * 60))
+    local diff_cleanup_minutes=$((BACKUP_DIFF_CLEANUP_TIME * 60))
+    local full_deleted=0
+    local diff_deleted=0
+    local backup_type=""
+
+    while IFS= read -r -d '' FILE; do
+        case "${FILE}" in
+            */FULL/*)
+                backup_type="FULL"
+                full_deleted=$((full_deleted + 1))
+                ;;
+            */DIFF/*)
+                backup_type="DIFF"
+                diff_deleted=$((diff_deleted + 1))
+                ;;
+            *)
+                continue
+                ;;
+        esac
+
+        rm -- "${FILE}"
+        echo "$(date): Deleted expired compressed ${backup_type} backup: ${FILE}"
+    done < <(find "${OUT_DIR}" -type f \
+        \( \( -path "*/FULL/*" -mmin +"${full_cleanup_minutes}" \) \
+           -o \( -path "*/DIFF/*" -mmin +"${diff_cleanup_minutes}" \) \) \
+        \( -name "*.bak.zst" -o -name "*.bak.gz" -o -name "*.bak.7z" \
+           -o -name "*.dif.zst" -o -name "*.dif.gz" -o -name "*.dif.7z" \
+           -o -name "*.trn.zst" -o -name "*.trn.gz" -o -name "*.trn.7z" \) \
+        -print0)
+
+    echo "$(date): Compressed FULL cleanup complete (${full_deleted} file(s) deleted, retention ${BACKUP_FULL_CLEANUP_TIME} hour(s))."
+    echo "$(date): Compressed DIFF cleanup complete (${diff_deleted} file(s) deleted, retention ${BACKUP_DIFF_CLEANUP_TIME} hour(s))."
+}
+
+cleanup_compressed_archives
 
 echo "$(date): Compression pass complete."
