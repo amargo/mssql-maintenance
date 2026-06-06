@@ -108,6 +108,8 @@ The mounted file replaces the image's built-in schedule entirely. The container 
 | `TZ` | No | Timezone for cron (default: UTC) |
 | `BACKUP_FULL_CLEANUP_TIME` | No | Full backup retention in hours for Ola `@CleanupTime` (default: `168`) |
 | `BACKUP_DIFF_CLEANUP_TIME` | No | Differential backup retention in hours for Ola `@CleanupTime` (default: `48`) |
+| `BACKUP_DIRECTORY_STRUCTURE` | No | Ola `@DirectoryStructure` pattern (default: `{DatabaseName}{DirectorySeparator}{BackupType}`) |
+| `BACKUP_FILE_NAME` | No | Ola `@FileName` pattern (default: `{DatabaseName}_{BackupType}_{Year}{Month}{Day}_{Hour}{Minute}{Second}_{FileNumber}.{FileExtension}`) |
 | `BACKUP_FILE_COMPRESS` | No | External post-backup compression mode: `none`, `zstd`, `gz`, or `7z` (default: `none` — disabled) |
 | `BACKUP_FILE_COMPRESS_LEVEL` | No | External compression level. `zstd`: `1-19`; `gz`: `1-9`; `7z`: `0-9` (default: `6`) |
 | `BACKUP_FILE_COMPRESS_DELETE_ORIGINAL` | No | Delete original `.bak` after successful compression (`Y`/`N`, default: `N` — keep originals) |
@@ -119,6 +121,20 @@ Backup target directory is set in `scripts/backup-full.sh` and `scripts/backup-d
 
 ```bash
 @Directory   = '/var/opt/mssql/backup' # path inside SQL Server container
+```
+
+Backup directory and file naming are controlled by Ola tokens. By default, this image omits the SQL Server container hostname from the path and filename. A full backup is written in this shape:
+
+```text
+/var/opt/mssql/backup/kurProduction-core/FULL/kurProduction-core_FULL_20260605_221930.bak
+```
+
+You can override the naming pattern in Compose:
+
+```yaml
+environment:
+  BACKUP_DIRECTORY_STRUCTURE: "{DatabaseName}{DirectorySeparator}{BackupType}"
+  BACKUP_FILE_NAME: "{DatabaseName}_{BackupType}_{Year}{Month}{Day}_{Hour}{Minute}{Second}_{FileNumber}.{FileExtension}"
 ```
 
 Ola Hallengren's `@CleanupTime` is backup retention in hours. It controls how long old backup files of the same type are kept before Ola cleanup can remove them. Full and differential backups have separate values because they usually have different retention windows. `BACKUP_FULL_CLEANUP_TIME` defaults to `168` hours and `BACKUP_DIFF_CLEANUP_TIME` defaults to `48` hours. Both values must be positive integers; empty, zero, and non-numeric values fail before `sqlcmd` runs.
@@ -253,6 +269,22 @@ environment:
 ```
 
 Without this, backups will succeed but produce uncompressed `.bak` files (no error, just larger files).
+
+### Backup directory structure default changed
+
+The default backup path now omits the SQL Server container hostname:
+
+```text
+/var/opt/mssql/backup/<DatabaseName>/<BackupType>/
+```
+
+If you have local backups under the previous hostname-prefixed path, remove that old directory manually after verifying it is no longer needed. To preserve the old path layout instead, set these env vars explicitly:
+
+```yaml
+environment:
+  BACKUP_DIRECTORY_STRUCTURE: "{ServerName}${InstanceName}{DirectorySeparator}{DatabaseName}{DirectorySeparator}{BackupType}_{Partial}_{CopyOnly}"
+  BACKUP_FILE_NAME: "{ServerName}${InstanceName}_{DatabaseName}_{BackupType}_{Partial}_{CopyOnly}_{Year}{Month}{Day}_{Hour}{Minute}{Second}_{FileNumber}.{FileExtension}"
+```
 
 ## License
 
