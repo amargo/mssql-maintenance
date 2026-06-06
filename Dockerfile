@@ -2,7 +2,7 @@ FROM alpine:3.23
 
 RUN apk add --no-cache bash ca-certificates curl gzip p7zip zstd
 
-ARG SQLCMD_VER=1.8.1
+ARG SQLCMD_VER=1.10.0
 RUN curl -fsSL "https://github.com/microsoft/go-sqlcmd/releases/download/v${SQLCMD_VER}/sqlcmd-linux-amd64.tar.bz2" \
     | tar -xj -C /usr/local/bin sqlcmd \
     && chmod +x /usr/local/bin/sqlcmd
