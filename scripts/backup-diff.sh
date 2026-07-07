@@ -17,14 +17,16 @@ if [ -n "${BACKUP_ENCRYPT_PASSWORD:-}" ]; then
     ENCRYPT_PARAMS="@Encrypt = 'Y', @EncryptionAlgorithm = 'AES_256', @EncryptionKey = '${BACKUP_ENCRYPT_PASSWORD}',"
 fi
 
-BACKUP_DIRECTORY_STRUCTURE="${BACKUP_DIRECTORY_STRUCTURE:-{DatabaseName}{DirectorySeparator}{BackupType}}"
-BACKUP_FILE_NAME="${BACKUP_FILE_NAME:-{DatabaseName}_{BackupType}_{Year}{Month}{Day}_{Hour}{Minute}{Second}_{FileNumber}.{FileExtension}}"
+DEFAULT_BACKUP_DIRECTORY_STRUCTURE='{DatabaseName}{DirectorySeparator}{BackupType}'
+DEFAULT_BACKUP_FILE_NAME='{DatabaseName}_{BackupType}_{Year}{Month}{Day}_{Hour}{Minute}{Second}_{FileNumber}.{FileExtension}'
+BACKUP_DIRECTORY_STRUCTURE="${BACKUP_DIRECTORY_STRUCTURE:-$DEFAULT_BACKUP_DIRECTORY_STRUCTURE}"
+BACKUP_FILE_NAME="${BACKUP_FILE_NAME:-$DEFAULT_BACKUP_FILE_NAME}"
 
 BACKUP_DIRECTORY_STRUCTURE_SQL="${BACKUP_DIRECTORY_STRUCTURE//\'/\'\'}"
 BACKUP_FILE_NAME_SQL="${BACKUP_FILE_NAME//\'/\'\'}"
 
 echo "$(date): Starting differential backup..."
-sqlcmd -S "${MSSQL_HOST}" -U sa -P "${MSSQL_SA_PASSWORD}" -C -Q "
+sqlcmd -S "${MSSQL_HOST}" -U sa -P "${MSSQL_SA_PASSWORD}" -C -b -Q "
 EXEC master.dbo.DatabaseBackup
   @Databases   = 'USER_DATABASES',
   @Directory   = '/var/opt/mssql/backup',
