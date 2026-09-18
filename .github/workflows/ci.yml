@@ -5,19 +5,27 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'Dockerfile'
+      - 'Dockerfile*'
       - 'crontab'
       - 'scripts/**'
       - '.github/workflows/**'
   pull_request:
     branches: [ main ]
     paths:
-      - 'Dockerfile'
+      - 'Dockerfile*'
       - 'crontab'
       - 'scripts/**'
       - '.github/workflows/**'
   release:
     types: [published]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   build-and-push-docker-image:
@@ -27,7 +35,7 @@ jobs:
       IMAGE_NAME: mssql-maintenance
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -75,7 +83,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }}
+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Log into Docker Hub
         if: github.event_name != 'pull_request'
