@@ -19,8 +19,10 @@
     "dockerfile",
     "github-actions"
   ],
-  "dependencyDashboard": true,
-  "dependencyDashboardTitle": "📦 Dependency Dashboard",
+  "dependencyDashboard": {
+    "enabled": true,
+    "title": "📦 Dependency Dashboard"
+  },
   "abandonmentThreshold": "1 year",
   "osvVulnerabilityAlerts": true,
   "platformAutomerge": true,
